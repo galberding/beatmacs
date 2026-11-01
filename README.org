@@ -1,0 +1,238 @@
+#+TITLE: beatmacs — beats for rapping, made in Emacs
+
+beatmacs generates Dubstep, Drum & Bass and Rap/R&B loops with a
+synthesizer written in pure Emacs Lisp. It plays them on repeat so you
+can rap or sing over them. The panel works with the keyboard and with
+taps on Emacs for Android.
+
+#+begin_example
+ ♪ untitled
+   Dubstep · Half-time · 140 BPM · F minor
+   ▶ Play       ↻ Render       ? Help
+───────────────────────────────────────────
+ ▸ Drums     K·h·h·h·S·K·h·o·            ← track layers (tap = select)
+   Bass      ■─────■─■───■───
+   + Layer
+───────────────────────────────────────────
+Style                │ Groove             ← columns of the current page
+──────────────────── │ ────────────────────
+Genre                │ Tempo
+ ▸ Dubstep           │  −    140 BPM     +
+   Drum & Bass       │
+   Rap / R&B         │ Swing
+                     │  −       0%       +
+Pattern              │
+ ▸ Half-time         │ Key
+   Riddim            │  −    F minor     +
+   Brostep           │
+───────────────────────────────────────────
+   P1 Beat      P2 Sound       P3 Mix     ← pages
+                 ⚙ Config
+#+end_example
+
+* Install
+
+** Android (or anywhere, no git needed)
+
+Evaluate this in =*scratch*= (=C-x C-e= after the last parenthesis).
+Run it again later to update, then restart Emacs.
+
+#+begin_src emacs-lisp
+(let* ((base "https://raw.githubusercontent.com/galberding/beatmacs/main/")
+       (dir (expand-file-name "beatmacs/" user-emacs-directory)))
+  (make-directory dir t)
+  (dolist (f '("beatmacs.el" "beatmacs-core.el" "beatmacs-synth.el"
+               "beatmacs-styles.el" "beatmacs-player.el" "beatmacs-ui.el"))
+    (url-copy-file (concat base f) (expand-file-name f dir) t))
+  (add-to-list 'load-path dir)          ; needed so files compile together
+  (byte-recompile-directory dir 0 t)
+  (message "beatmacs installed in %s" dir))
+#+end_src
+
+and add to =init.el=:
+
+#+begin_src emacs-lisp
+(add-to-list 'load-path (expand-file-name "beatmacs" user-emacs-directory))
+(autoload 'beatmacs "beatmacs" nil t)
+#+end_src
+
+** Desktop (straight.el / use-package)
+
+#+begin_src emacs-lisp
+(use-package beatmacs
+  :straight nil
+  :load-path "~/emacs_setup/packages/beatmacs"
+  :commands beatmacs)
+#+end_src
+
+Then run =M-x beatmacs=. Byte-compile the package (=M-x byte-recompile-directory=, or
+native-comp). Rendering is then roughly 0.1–0.3 s per loop on a desktop.
+A phone will be several times slower; set *Sample rate* to 11 kHz on the
+Config page if it feels sluggish.
+
+Requires Emacs 29.1 or later.
+
+* Playback
+
+=beatmacs-player= defaults to =auto= and uses the first player it finds:
+
+| Player         | Loops seamlessly        | Notes                                              |
+|----------------+-------------------------+----------------------------------------------------|
+| =mpv=          | yes                     | recommended (desktop and Termux)                   |
+| =ffplay=       | yes                     |                                                    |
+| =play= (SoX)   | yes (beatmacs restarts it) |                                                 |
+| =paplay=, =aplay= | yes (beatmacs restarts it) |                                              |
+| =android-open= | no                      | copies the WAV to =/sdcard/Music/beatmacs/= and opens your media app |
+| =emacs=        | no                      | =play-sound-file=, blocks Emacs, last resort       |
+
+** Android setup (recommended: Termux + mpv)
+
+Stock Emacs for Android cannot output audio, so beatmacs drives a player
+from Termux:
+
+1. Install *both* Emacs and Termux from *F-Droid*. Builds from the same
+   source share a Linux user ID, which lets Emacs run Termux programs.
+   The Play Store and GitHub builds don't share it.
+2. In Termux, run =pkg install mpv=.
+3. That's all. beatmacs looks in =/data/data/com.termux/files/usr/bin=
+   by itself (=beatmacs-termux-bin=).
+
+If mpv can't find an audio output, try
+=(setq beatmacs-player-extra-args '((mpv "--ao=opensles")))=.
+
+Without Termux, set the player to =android-open= on the Config page.
+Emacs needs storage permission for =/sdcard/Music/=.
+
+*Not tested on a real phone yet.* The Termux and Android code paths are
+written against the documented Emacs-for-Android behaviour but haven't
+been run on a device. Desktop playback, rendering and the UI are tested.
+
+* Keys
+
+| Key            | Action                                         |
+|----------------+------------------------------------------------|
+| =TAB= / =S-TAB=, =n= / =p= | move between buttons               |
+| =RET= / tap    | press button                                   |
+| =+= / =-=      | step the option at point (=C-u= = big step)    |
+| tap the value  | type an exact value                            |
+| =SPC=          | play / stop                                    |
+| =r=            | re-render and play                             |
+| =1= =2= =3=, =c= | pages Beat / Sound / Mix, Config             |
+| =<= / =>=      | previous / next layer                          |
+| =a=            | add layer                                      |
+| =?=            | learning notes for the current genre and page  |
+| =s= / =o= / =e= | save preset / open preset / export WAV        |
+| =q=            | stop and close                                 |
+
+With *Live re-render* on (the default), any change you make while the
+loop plays gets rendered again and restarts the loop after a 0.6 s pause.
+
+* Pages
+
+- *P1 Beat*: genre, pattern variant, tempo, swing, key, loop length
+- *P2 Sound*: controls for the selected layer
+  - drums: kick pitch and length, backbeat (snare / clap / both),
+    hi-hat override (8ths / 16ths / trap rolls / off), hat length
+  - bass: instrument (808 / sub / reese / wobble), octave, and the
+    controls of that instrument (decay, drive, cutoff, resonance,
+    wobble rate, detune)
+- *P3 Mix*: layer volumes, mutes, master drive, remove a layer
+- *Config*: save, load and export, export length, engine, sample rate,
+  player, live re-render
+
+* How the sound is made
+
+All synthesis is in =beatmacs-synth.el=, and every instrument fits on
+one screen:
+
+- *Kick*: a sine whose pitch drops from about 150 Hz to 50 Hz in about
+  30 ms. That drop is the punch.
+- *Snare*: a short tone plus high-passed noise. *Clap*: three noise
+  bursts and a tail. *Hats*: twice high-passed noise.
+- *808*: a sine with a long decay and saturation. The saturation adds
+  harmonics, so it's audible on phone speakers too.
+- *Reese*: two detuned saws through a low-pass filter.
+- *Wobble*: saw plus square through a resonant low-pass whose cutoff is
+  swept by an LFO synced to the tempo.
+
+Every unique voice is rendered once and reused, and tails wrap around
+the loop end so the loop repeats seamlessly. The final mix runs through
+a soft saturator and is normalized to −1 dBFS.
+
+* Extending
+
+Patterns are step strings with 16 characters per bar: =X= accent,
+=x= normal, =o= ghost, =r= / =R= = 2 / 3 rapid hits, anything else
+is a rest. Bass notes are =(STEP LENGTH SEMITONES [LFO-RATE])=, played
+on top of a progression of scale degrees (one per bar).
+
+** A new pattern
+
+#+begin_src emacs-lisp
+(beatmacs-add-variant 'rap 'drill
+  :label "Drill" :bpm 142 :swing 0 :bass-type '808 :snare-sound 'clap
+  :notes "UK/NY drill: sliding 808s, snare on beat 4 of the half-time bar."
+  :drums '(:kick "X.....x...X....." :snare "............X..."
+           :hat  "x..x..x.x..x..x.")
+  :bass '((0 6 0) (6 4 3) (10 6 -2))
+  :progression '(0 5 3 6))
+#+end_src
+
+** A new genre
+
+=beatmacs-define-genre= takes the same keys plus =:notes=,
+=:rap-tips= and =:variants=. See =beatmacs-styles.el=.
+
+** A new layer type (e.g. melody)
+
+#+begin_src emacs-lisp
+(beatmacs-define-layer-type 'melody
+  :label "Melody" :volume 0.5 :defaults '(:octave 4)
+  :events (lambda (track layer) ...)          ; -> list of event plists
+  :preview (lambda (track layer width) "...") ; one-bar text preview
+  :columns (lambda (track layer) '(("Melody" octave))))
+#+end_src
+
+Events look like =(:time SEC :inst SYM :vel 0..1 :gain G :note MIDI :dur SEC :params PLIST)=.
+A new instrument symbol needs a case in =beatmacs-synth-voice=.
+
+** A new option or page
+
+#+begin_src emacs-lisp
+(beatmacs-define-option 'humanize
+  :label "Humanize" :kind 'number :min 0 :max 50 :step 5
+  :get (lambda (tr ly arg) ...) :set (lambda (tr ly value arg) ...)
+  :help "Random timing offsets.")
+
+(beatmacs-define-page 'fx :label "FX" :tab t
+  :columns '(("Groove" humanize) ("Space")))
+#+end_src
+
+Option kinds: =number= (− value +), =enum= (− choice +), =choice=
+(stacked buttons), =toggle=, =action=.
+
+** A new sound engine
+
+#+begin_src emacs-lisp
+(beatmacs-define-backend 'fluidsynth
+  :label "FluidSynth"
+  :render (lambda (track file sample-rate &optional seconds)
+            ;; turn (beatmacs-track-events track) into MIDI,
+            ;; call fluidsynth -F FILE ..., return FILE
+            ))
+#+end_src
+
+* Tests
+
+#+begin_src sh
+emacs -Q --batch -L . -l beatmacs-tests.el -f ert-run-tests-batch-and-exit
+#+end_src
+
+* Ideas for later
+
+- Melody and chord layers. The track list and =:events= are ready for them.
+- An editable step grid (tap cells to toggle hits).
+- Mutate / variation: fills every 4th bar, ghost notes, humanized
+  timing.
+- A FluidSynth backend for sampled drums and MIDI export.
+- Microphone recording over the beat (Termux =termux-microphone-record=).
